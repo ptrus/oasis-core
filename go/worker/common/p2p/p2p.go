@@ -27,10 +27,13 @@ import (
 	"github.com/oasisprotocol/oasis-core/go/common/node"
 	"github.com/oasisprotocol/oasis-core/go/common/version"
 	consensus "github.com/oasisprotocol/oasis-core/go/consensus/api"
+	lightClient "github.com/oasisprotocol/oasis-core/go/consensus/tendermint/light/client"
 	registryAPI "github.com/oasisprotocol/oasis-core/go/registry/api"
 	"github.com/oasisprotocol/oasis-core/go/worker/common/configparser"
 	"github.com/oasisprotocol/oasis-core/go/worker/common/p2p/api"
+	p2plight "github.com/oasisprotocol/oasis-core/go/worker/common/p2p/light"
 	"github.com/oasisprotocol/oasis-core/go/worker/common/p2p/rpc"
+	p2prpc "github.com/oasisprotocol/oasis-core/go/worker/common/p2p/rpc"
 )
 
 const (
@@ -68,6 +71,9 @@ type p2p struct {
 
 	registerAddresses []multiaddr.Multiaddr
 	topics            map[common.Namespace]map[api.TopicKind]*topicHandler
+
+	lc        consensus.LightClient
+	consensus consensus.Backend
 
 	logger *logging.Logger
 }
@@ -313,6 +319,29 @@ func messageIdFn(pmsg *pb.Message) string { // nolint: revive
 	return string(h.Sum(nil))
 }
 
+func (p *p2p) startConsensusLightClient() error {
+	cfg := p.consensus.LightClientConfig()
+	if cfg.TrustOptions.Height == 0 {
+		return nil
+	}
+	cfg.ConsensusNodes = []node.TLSAddress{}
+	cfg.P2PNodes = 3
+
+	p2pClient := p2prpc.NewClient(p, common.Namespace{}, p2plight.LightProtocolID, p2plight.LightProtocolVersion)
+	lc, err := lightClient.NewClient(p.ctx, cfg, p2pClient)
+	if err != nil {
+		return err
+	}
+	p.lc = lc
+
+	return nil
+}
+
+// TODO: hack!.
+func (p *p2p) ConsensusLightClient() consensus.LightClient {
+	return p.lc
+}
+
 // New creates a new P2P node.
 func New(identity *identity.Identity, consensus consensus.Backend) (api.Service, error) {
 	// Instantiate the libp2p host.
@@ -456,6 +485,7 @@ func New(identity *identity.Identity, consensus consensus.Backend) (api.Service,
 		quitCh:            make(chan struct{}),
 		chainContext:      chainContext,
 		host:              host,
+		consensus:         consensus,
 		pubsub:            pubsub,
 		registerAddresses: registerAddresses,
 		topics:            make(map[common.Namespace]map[api.TopicKind]*topicHandler),
@@ -470,6 +500,10 @@ func New(identity *identity.Identity, consensus consensus.Backend) (api.Service,
 		p.logger.Info("p2p blacklist initialized",
 			"num_blocked_peers", len(blacklist),
 		)
+	}
+
+	if err = p.startConsensusLightClient(); err != nil {
+		return nil, err
 	}
 
 	return p, nil

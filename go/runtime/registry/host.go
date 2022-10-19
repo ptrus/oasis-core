@@ -153,6 +153,8 @@ type RuntimeHostHandlerEnvironment interface {
 
 	// GetNodeIdentity returns the identity of a node running this runtime.
 	GetNodeIdentity(ctx context.Context) (*identity.Identity, error)
+
+	GetP2PLightClient(ctx context.Context) consensus.LightClient
 }
 
 // RuntimeHostHandler is a runtime host handler suitable for compute runtimes. It provides the
@@ -250,11 +252,38 @@ func (h *runtimeHostHandler) handleHostFetchConsensusBlock(
 	ctx context.Context,
 	rq *protocol.HostFetchConsensusBlockRequest,
 ) (*protocol.HostFetchConsensusBlockResponse, error) {
+	// Try local backend first.
 	lb, err := h.consensus.GetLightBlock(ctx, int64(rq.Height))
+	if err == nil {
+		return &protocol.HostFetchConsensusBlockResponse{Block: *lb}, nil
+	}
+	// Fetch block via P2P light client.
+	time.Sleep(1 * time.Second) // TODO: Hack.
+	blk, err := h.env.GetP2PLightClient(ctx).GetVerifiedLightBlock(ctx, int64(rq.Height))
 	if err != nil {
 		return nil, err
 	}
-	return &protocol.HostFetchConsensusBlockResponse{Block: *lb}, nil
+	protoLb, err := blk.ToProto()
+	if err != nil {
+		return nil, fmt.Errorf("tendermint: failed to convert light block: %w", err)
+	}
+	if protoLb.ValidatorSet != nil {
+		// ToProto sets the TotalVotingPower to 0, but the rust side FromProto requires it.
+		// https://github.com/tendermint/tendermint/blob/41c176ccc6a75d25631d0f891efb2e19a33329dc/types/validator_set.go#L949-L951
+		// https://github.com/informalsystems/tendermint-rs/blob/c70f6eea9ccd1f41c0a608c5285b6af98b66c9fe/tendermint/src/validator.rs#L38-L45
+		protoLb.ValidatorSet.TotalVotingPower = blk.ValidatorSet.TotalVotingPower()
+	}
+
+	meta, err := protoLb.Marshal()
+	if err != nil {
+		return nil, fmt.Errorf("tendermint: failed to marshal light block: %w", err)
+	}
+	return &protocol.HostFetchConsensusBlockResponse{
+		Block: consensus.LightBlock{
+			Height: blk.Height,
+			Meta:   meta,
+		},
+	}, nil
 }
 
 func (h *runtimeHostHandler) handleHostFetchConsensusEvents(

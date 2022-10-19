@@ -284,11 +284,13 @@ func (args *argBuilder) tendermintStateSync(
 	consensusNodes []string,
 	trustHeight uint64,
 	trustHash string,
+	p2pNodes uint16,
 ) *argBuilder {
 	args.vec = append(args.vec, []Argument{
 		{tendermintFull.CfgConsensusStateSyncEnabled, nil, false},
 		{tendermintFull.CfgConsensusStateSyncTrustHeight, []string{strconv.FormatUint(trustHeight, 10)}, false},
 		{tendermintFull.CfgConsensusStateSyncTrustHash, []string{trustHash}, false},
+		{tendermintFull.CfgConsensusStateSyncNumP2PNodes, []string{strconv.FormatUint(uint64(p2pNodes), 10)}, false},
 	}...)
 	for _, address := range consensusNodes {
 		args.vec = append(args.vec, Argument{tendermintFull.CfgConsensusStateSyncConsensusNode, []string{address}, true})

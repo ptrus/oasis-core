@@ -797,6 +797,8 @@ func RegisterScenarios() error {
 		RuntimeUpgrade,
 		// HistoryReindex test.
 		HistoryReindex,
+		// Light Blocks P2P tet.
+		LightBlockP2P,
 		// TrustRoot test.
 		TrustRoot,
 		TrustRootChangeTest,

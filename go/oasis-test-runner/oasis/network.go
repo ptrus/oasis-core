@@ -627,6 +627,7 @@ func (net *Network) startOasisNode(
 			node.consensusStateSync.ConsensusNodes,
 			node.consensusStateSync.TrustHeight,
 			node.consensusStateSync.TrustHash,
+			3,
 		)
 	}
 	if viper.IsSet(metrics.CfgMetricsAddr) {

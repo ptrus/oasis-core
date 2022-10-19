@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"math/rand"
 	"path/filepath"
@@ -49,7 +50,6 @@ import (
 	tmcommon "github.com/oasisprotocol/oasis-core/go/consensus/tendermint/common"
 	"github.com/oasisprotocol/oasis-core/go/consensus/tendermint/crypto"
 	"github.com/oasisprotocol/oasis-core/go/consensus/tendermint/db"
-	"github.com/oasisprotocol/oasis-core/go/consensus/tendermint/light"
 	genesisAPI "github.com/oasisprotocol/oasis-core/go/genesis/api"
 	"github.com/oasisprotocol/oasis-core/go/oasis-node/cmd/common/flags"
 	cmflags "github.com/oasisprotocol/oasis-core/go/oasis-node/cmd/common/flags"
@@ -57,6 +57,7 @@ import (
 	registryAPI "github.com/oasisprotocol/oasis-core/go/registry/api"
 	stakingAPI "github.com/oasisprotocol/oasis-core/go/staking/api"
 	upgradeAPI "github.com/oasisprotocol/oasis-core/go/upgrade/api"
+	p2pAPI "github.com/oasisprotocol/oasis-core/go/worker/common/p2p/api"
 )
 
 const (
@@ -101,6 +102,8 @@ const (
 	// CfgConsensusStateSyncConsensusNode specifies nodes exposing public consensus services which
 	// are used to sync a light client.
 	CfgConsensusStateSyncConsensusNode = "consensus.tendermint.state_sync.consensus_node"
+	// CfgConsensusStateSyncNumP2PNodes is the number of P2P nodes to use for light client.
+	CfgConsensusStateSyncNumP2PNodes = "consensus.tendermint.state_sync.num_p2p_nodes"
 	// CfgConsensusStateSyncTrustPeriod is the light client trust period.
 	CfgConsensusStateSyncTrustPeriod = "consensus.tendermint.state_sync.trust_period"
 	// CfgConsensusStateSyncTrustHeight is the known trusted height for the light client.
@@ -143,6 +146,10 @@ type fullService struct { // nolint: maligned
 	sync.Mutex
 	*commonNode
 
+	p2p p2pAPI.Service
+
+	lcConfig consensusAPI.LightClientConfig
+
 	upgrader      upgradeAPI.Backend
 	node          *tmnode.Node
 	client        *tmcli.Local
@@ -159,6 +166,10 @@ type fullService struct { // nolint: maligned
 	stopOnce sync.Once
 
 	nextSubscriberID uint64
+}
+
+func (t *fullService) LightClientConfig() consensusAPI.LightClientConfig {
+	return t.lcConfig
 }
 
 // Implements consensusAPI.Backend.
@@ -722,9 +733,33 @@ func (t *fullService) lazyInit() error { // nolint: gocyclo
 		return db, nil
 	}
 
+	hash := viper.GetString(CfgConsensusStateSyncTrustHash)
+	bytes, err := hex.DecodeString(hash)
+	if err != nil {
+		panic(err)
+	}
+	cfg := consensusAPI.LightClientConfig{
+		GenesisDocument: tmGenDoc,
+		P2PNodes:        viper.GetUint16(CfgConsensusStateSyncNumP2PNodes),
+		TrustOptions: tmlight.TrustOptions{
+			Period: viper.GetDuration(CfgConsensusStateSyncTrustPeriod),
+			Height: int64(viper.GetUint64(CfgConsensusStateSyncTrustHeight)),
+			Hash:   bytes,
+		},
+	}
+	for _, rawAddr := range viper.GetStringSlice(CfgConsensusStateSyncConsensusNode) {
+		var addr node.TLSAddress
+		if err = addr.UnmarshalText([]byte(rawAddr)); err != nil {
+			return fmt.Errorf("failed to parse state sync consensus node address (%s): %w", rawAddr, err)
+		}
+
+		cfg.ConsensusNodes = append(cfg.ConsensusNodes, addr)
+	}
+	t.lcConfig = cfg
+
 	// Configure state sync if enabled.
 	var stateProvider tmstatesync.StateProvider
-	if viper.GetBool(CfgConsensusStateSyncEnabled) {
+	if viper.GetBool(CfgConsensusStateSyncEnabled) && len(cfg.ConsensusNodes) > 1 {
 		t.Logger.Info("state sync enabled")
 
 		// Enable state sync in the configuration.
@@ -732,23 +767,8 @@ func (t *fullService) lazyInit() error { // nolint: gocyclo
 		tenderConfig.StateSync.TrustHash = viper.GetString(CfgConsensusStateSyncTrustHash)
 
 		// Create new state sync state provider.
-		cfg := light.ClientConfig{
-			GenesisDocument: tmGenDoc,
-			TrustOptions: tmlight.TrustOptions{
-				Period: viper.GetDuration(CfgConsensusStateSyncTrustPeriod),
-				Height: int64(viper.GetUint64(CfgConsensusStateSyncTrustHeight)),
-				Hash:   tenderConfig.StateSync.TrustHashBytes(),
-			},
-		}
-		for _, rawAddr := range viper.GetStringSlice(CfgConsensusStateSyncConsensusNode) {
-			var addr node.TLSAddress
-			if err = addr.UnmarshalText([]byte(rawAddr)); err != nil {
-				return fmt.Errorf("failed to parse state sync consensus node address (%s): %w", rawAddr, err)
-			}
-
-			cfg.ConsensusNodes = append(cfg.ConsensusNodes, addr)
-		}
-		if stateProvider, err = newStateProvider(t.ctx, cfg); err != nil {
+		// TODO: in future could support libp2p state providers.
+		if stateProvider, err = newStateProvider(t.ctx, t.lcConfig); err != nil {
 			t.Logger.Error("failed to create state sync state provider",
 				"err", err,
 			)
@@ -1025,6 +1045,7 @@ func init() {
 	Flags.StringSlice(CfgConsensusStateSyncConsensusNode, []string{}, "state sync: consensus node to use for syncing the light client")
 	Flags.Duration(CfgConsensusStateSyncTrustPeriod, 24*time.Hour, "state sync: light client trust period")
 	Flags.Uint64(CfgConsensusStateSyncTrustHeight, 0, "state sync: light client trusted height")
+	Flags.Uint16(CfgConsensusStateSyncNumP2PNodes, 0, "state sync: number of p2p peers to use")
 	Flags.String(CfgConsensusStateSyncTrustHash, "", "state sync: light client trusted consensus header hash")
 
 	Flags.Duration(CfgUpgradeStopDelay, 60*time.Second, "average amount of time to delay shutting down the node on upgrade")

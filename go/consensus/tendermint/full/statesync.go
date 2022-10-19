@@ -11,13 +11,14 @@ import (
 
 	"github.com/oasisprotocol/oasis-core/go/common/logging"
 	"github.com/oasisprotocol/oasis-core/go/common/version"
-	"github.com/oasisprotocol/oasis-core/go/consensus/tendermint/light"
+	consensusAPI "github.com/oasisprotocol/oasis-core/go/consensus/api"
+	lightClient "github.com/oasisprotocol/oasis-core/go/consensus/tendermint/light/client"
 )
 
 type stateProvider struct {
 	sync.Mutex
 
-	lc              light.Client
+	lc              consensusAPI.LightClient
 	genesisDocument *tmtypes.GenesisDoc
 
 	logger *logging.Logger
@@ -104,8 +105,8 @@ func (sp *stateProvider) State(ctx context.Context, height uint64) (tmstate.Stat
 	return state, nil
 }
 
-func newStateProvider(ctx context.Context, cfg light.ClientConfig) (tmstatesync.StateProvider, error) {
-	lc, err := light.NewClient(ctx, cfg)
+func newStateProvider(ctx context.Context, cfg consensusAPI.LightClientConfig) (tmstatesync.StateProvider, error) {
+	lc, err := lightClient.NewClient(ctx, cfg, nil)
 	if err != nil {
 		return nil, err
 	}

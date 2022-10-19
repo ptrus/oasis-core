@@ -9,6 +9,7 @@ import (
 	"github.com/oasisprotocol/oasis-core/go/common"
 	"github.com/oasisprotocol/oasis-core/go/common/crypto/signature"
 	"github.com/oasisprotocol/oasis-core/go/common/node"
+	consensus "github.com/oasisprotocol/oasis-core/go/consensus/api"
 	"github.com/oasisprotocol/oasis-core/go/worker/common/p2p/api"
 	"github.com/oasisprotocol/oasis-core/go/worker/common/p2p/rpc"
 )
@@ -83,6 +84,10 @@ func (p *nopP2P) RegisterProtocolServer(srv rpc.Server) {
 // Implements api.Service.
 func (p *nopP2P) GetMinRepublishInterval() time.Duration {
 	return time.Hour
+}
+
+func (p *nopP2P) ConsensusLightClient() consensus.LightClient {
+	return nil
 }
 
 // NewNop creates a new no-op P2P node.

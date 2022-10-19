@@ -783,6 +783,10 @@ func (n *commonNode) SubmissionManager() consensusAPI.SubmissionManager {
 	return &consensusAPI.NoOpSubmissionManager{}
 }
 
+func (n *commonNode) LightClientConfig() consensusAPI.LightClientConfig {
+	return consensusAPI.LightClientConfig{}
+}
+
 func newCommonNode(
 	ctx context.Context,
 	dataDir string,

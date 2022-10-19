@@ -42,6 +42,7 @@ import (
 	workerCommon "github.com/oasisprotocol/oasis-core/go/worker/common"
 	"github.com/oasisprotocol/oasis-core/go/worker/common/p2p"
 	p2pAPI "github.com/oasisprotocol/oasis-core/go/worker/common/p2p/api"
+	lightP2P "github.com/oasisprotocol/oasis-core/go/worker/common/p2p/light"
 	"github.com/oasisprotocol/oasis-core/go/worker/compute/executor"
 	workerConsensusRPC "github.com/oasisprotocol/oasis-core/go/worker/consensusrpc"
 	workerKeymanager "github.com/oasisprotocol/oasis-core/go/worker/keymanager"
@@ -214,6 +215,17 @@ func (n *Node) initRuntimeWorkers() error {
 		return err
 	}
 
+	if genesisDoc.Registry.Parameters.DebugAllowUnroutableAddresses {
+		p2p.DebugForceAllowUnroutableAddresses()
+	}
+	n.P2P, err = p2p.New(n.Identity, n.Consensus)
+	if err != nil {
+		return err
+	}
+	// Register light blocks P2P service.
+	n.P2P.RegisterProtocolServer(lightP2P.NewServer(n.Consensus))
+	n.svcMgr.Register(n.P2P)
+
 	// Initialize the IAS proxy client.
 	n.IAS, err = ias.New(n.Identity)
 	if err != nil {
@@ -229,24 +241,6 @@ func (n *Node) initRuntimeWorkers() error {
 		return err
 	}
 	n.svcMgr.RegisterCleanupOnly(n.RuntimeRegistry, "runtime registry")
-
-	// Initialize the P2P worker if any runtime mode is configured.
-	// Since the P2P layer does not have a separate Start method and starts
-	// listening immediately when created, make sure that we don't start it if
-	// it is not needed.
-	switch {
-	case n.RuntimeRegistry.Mode() != runtimeRegistry.RuntimeModeNone && n.Consensus.Mode() != consensusAPI.ModeArchive:
-		if genesisDoc.Registry.Parameters.DebugAllowUnroutableAddresses {
-			p2p.DebugForceAllowUnroutableAddresses()
-		}
-		n.P2P, err = p2p.New(n.Identity, n.Consensus)
-		if err != nil {
-			return err
-		}
-	default:
-		n.P2P = p2p.NewNop()
-	}
-	n.svcMgr.Register(n.P2P)
 
 	// Initialize the common worker.
 	n.CommonWorker, err = workerCommon.New(

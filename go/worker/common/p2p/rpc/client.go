@@ -10,6 +10,7 @@ import (
 	"github.com/eapache/channels"
 	"github.com/libp2p/go-libp2p/core"
 	"github.com/libp2p/go-libp2p/core/network"
+	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/protocol"
 
 	"github.com/oasisprotocol/oasis-core/go/common"
@@ -158,6 +159,17 @@ func WithLimitPeers(peers []PeerFeedback) CallOption {
 				continue
 			}
 			opts.limitPeers[pf.peerID] = struct{}{}
+		}
+	}
+}
+
+// WithPeer configures the peers that the call should be limited to.
+//
+// This function overrides any previously set WithLimitPeers setting.
+func WithPeer(peerID core.PeerID) CallOption {
+	return func(opts *CallOptions) {
+		opts.limitPeers = map[peer.ID]struct{}{
+			peerID: {},
 		}
 	}
 }

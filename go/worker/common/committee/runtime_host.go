@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/oasisprotocol/oasis-core/go/common/identity"
+	consensus "github.com/oasisprotocol/oasis-core/go/consensus/api"
 	"github.com/oasisprotocol/oasis-core/go/runtime/host"
 	"github.com/oasisprotocol/oasis-core/go/runtime/host/protocol"
 	runtimeKeymanager "github.com/oasisprotocol/oasis-core/go/runtime/keymanager/api"
@@ -38,6 +39,10 @@ func (env *nodeEnvironment) GetTxPool(ctx context.Context) (txpool.TransactionPo
 // GetIdentity implements RuntimeHostHandlerEnvironment.
 func (env *nodeEnvironment) GetNodeIdentity(ctx context.Context) (*identity.Identity, error) {
 	return env.n.Identity, nil
+}
+
+func (env *nodeEnvironment) GetP2PLightClient(ctx context.Context) consensus.LightClient {
+	return env.n.P2P.ConsensusLightClient()
 }
 
 // NewRuntimeHostHandler implements RuntimeHostHandlerFactory.

@@ -7,6 +7,10 @@ import (
 	"strings"
 	"time"
 
+	tmlight "github.com/tendermint/tendermint/light"
+	tmproto "github.com/tendermint/tendermint/proto/tendermint/types"
+	tmtypes "github.com/tendermint/tendermint/types"
+
 	beacon "github.com/oasisprotocol/oasis-core/go/beacon/api"
 	"github.com/oasisprotocol/oasis-core/go/common/cbor"
 	"github.com/oasisprotocol/oasis-core/go/common/crypto/hash"
@@ -370,6 +374,25 @@ type Backend interface {
 	//
 	// This may be nil in case checkpoints are disabled.
 	Checkpointer() checkpoint.Checkpointer
+
+	LightClientConfig() LightClientConfig
+}
+
+// LightClientConfig is the configuration for the light client.
+type LightClientConfig struct {
+	// GenesisDocument is the Tendermint genesis document.
+	GenesisDocument *tmtypes.GenesisDoc
+
+	// ConsensusNodes is a list of nodes exposing the Oasis Core public consensus services that are
+	// used to fetch data required for syncing light clients. The first node is considered the
+	// primary and at least two nodes must be specified.
+	ConsensusNodes []node.TLSAddress
+
+	// P2PNodes is the number of P2P nodes that should be used to fetch data required for syncing light clients.
+	P2PNodes uint16
+
+	// TrustOptions are Tendermint light client trust options.
+	TrustOptions tmlight.TrustOptions
 }
 
 // HaltHook is a function that gets called when consensus needs to halt for some reason.
@@ -418,4 +441,16 @@ type GetSignerNonceRequest struct {
 type TransactionsWithResults struct {
 	Transactions [][]byte          `json:"transactions"`
 	Results      []*results.Result `json:"results"`
+}
+
+// LightClient is a Tendermint consensus light client that talks with a remote oasis-node that is using
+// the Tendermint consensus backend and verifies responses.
+type LightClient interface {
+	LightClientBackend
+
+	// GetVerifiedLightBlock returns a verified light block.
+	GetVerifiedLightBlock(ctx context.Context, height int64) (*tmtypes.LightBlock, error)
+
+	// GetVerifiedParameters returns verified consensus parameters.
+	GetVerifiedParameters(ctx context.Context, height int64) (*tmproto.ConsensusParams, error)
 }

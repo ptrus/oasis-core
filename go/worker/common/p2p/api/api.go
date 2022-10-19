@@ -13,6 +13,7 @@ import (
 	"github.com/oasisprotocol/oasis-core/go/common/crypto/signature"
 	"github.com/oasisprotocol/oasis-core/go/common/node"
 	"github.com/oasisprotocol/oasis-core/go/common/service"
+	consensus "github.com/oasisprotocol/oasis-core/go/consensus/api"
 	"github.com/oasisprotocol/oasis-core/go/worker/common/p2p/rpc"
 )
 
@@ -64,6 +65,8 @@ type Service interface {
 	//
 	// This makes it less likely for those nodes to be pruned.
 	SetNodeImportance(kind ImportanceKind, runtimeID common.Namespace, p2pIDs map[signature.PublicKey]bool)
+
+	ConsensusLightClient() consensus.LightClient
 }
 
 // Handler is a handler for P2P messages.

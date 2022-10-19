@@ -215,7 +215,7 @@ steps:
       # Since the trust-root scenarios are tested in SGX mode (for which they are actually relevant)
       # no need to also test them in non-SGX mode in CI. Also exclude txsource-multi-short so that
       # we ensure it runs only on non-SGX agents.
-      OASIS_EXCLUDE_E2E: e2e/runtime/trust-root/simple,e2e/runtime/trust-root/change,e2e/runtime/trust-root/change-fails,e2e/runtime/txsource-multi-short
+      OASIS_EXCLUDE_E2E: e2e/runtime/trust-root/simple,e2e/runtime/trust-root/change,e2e/runtime/trust-root/change-fails,e2e/runtime/light-block-p2p,e2e/runtime/txsource-multi-short
       TEST_BASE_DIR: /tmp
     retry:
       <<: *retry_agent_failure

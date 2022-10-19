@@ -55,6 +55,8 @@ ${test_runner_binary} \
     --e2e/runtime.ias.mock=${ias_mock} \
     --e2e/runtime/trust-root/{simple,change,change-fails}.runtime.source_dir=${WORKDIR}/tests/runtimes \
     --e2e/runtime/trust-root/{simple,change,change-fails}.runtime.target_dir=${WORKDIR}/target \
+    --e2e/runtime/light-block-p2p.runtime.source_dir=${WORKDIR}/tests/runtimes \
+    --e2e/runtime/light-block-p2p.runtime.target_dir=${WORKDIR}/target \
     --remote-signer.binary ${WORKDIR}/go/oasis-remote-signer/oasis-remote-signer \
     --plugin-signer.name example \
     --plugin-signer.binary ${WORKDIR}/go/oasis-test-runner/scenario/pluginsigner/example_signer_plugin/example_signer_plugin \

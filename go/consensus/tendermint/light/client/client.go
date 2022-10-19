@@ -3,12 +3,10 @@ package light
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
 	"github.com/spf13/viper"
-	"google.golang.org/grpc"
 
 	tmlight "github.com/tendermint/tendermint/light"
 	tmlightprovider "github.com/tendermint/tendermint/light/provider"
@@ -17,112 +15,15 @@ import (
 	tmtypes "github.com/tendermint/tendermint/types"
 	tmdb "github.com/tendermint/tm-db"
 
-	"github.com/oasisprotocol/oasis-core/go/common/crypto/signature"
-	cmnGrpc "github.com/oasisprotocol/oasis-core/go/common/grpc"
-	"github.com/oasisprotocol/oasis-core/go/common/identity"
-	"github.com/oasisprotocol/oasis-core/go/common/node"
 	consensus "github.com/oasisprotocol/oasis-core/go/consensus/api"
 	"github.com/oasisprotocol/oasis-core/go/consensus/api/transaction"
 	"github.com/oasisprotocol/oasis-core/go/consensus/tendermint/common"
+	"github.com/oasisprotocol/oasis-core/go/consensus/tendermint/light"
+	"github.com/oasisprotocol/oasis-core/go/consensus/tendermint/light/client/grpc"
+	"github.com/oasisprotocol/oasis-core/go/consensus/tendermint/light/client/p2p"
 	"github.com/oasisprotocol/oasis-core/go/storage/mkvs/syncer"
+	p2prpc "github.com/oasisprotocol/oasis-core/go/worker/common/p2p/rpc"
 )
-
-// ClientConfig is the configuration for the light client.
-type ClientConfig struct {
-	// GenesisDocument is the Tendermint genesis document.
-	GenesisDocument *tmtypes.GenesisDoc
-
-	// ConsensusNodes is a list of nodes exposing the Oasis Core public consensus services that are
-	// used to fetch data required for syncing light clients. The first node is considered the
-	// primary and at least two nodes must be specified.
-	ConsensusNodes []node.TLSAddress
-
-	// TrustOptions are Tendermint light client trust options.
-	TrustOptions tmlight.TrustOptions
-}
-
-// lightClientProvider implements Tendermint's light client provider interface using the Oasis Core
-// light client API.
-type lightClientProvider struct {
-	chainID string
-	client  consensus.LightClientBackend
-}
-
-// Implements tmlightprovider.Provider.
-func (lp *lightClientProvider) ChainID() string {
-	return lp.chainID
-}
-
-// Implements tmlightprovider.Provider.
-func (lp *lightClientProvider) LightBlock(ctx context.Context, height int64) (*tmtypes.LightBlock, error) {
-	lb, err := lp.client.GetLightBlock(ctx, height)
-	switch {
-	case err == nil:
-	case errors.Is(err, consensus.ErrVersionNotFound):
-		return nil, tmlightprovider.ErrLightBlockNotFound
-	default:
-		return nil, tmlightprovider.ErrNoResponse
-	}
-
-	// Decode Tendermint-specific light block.
-	var protoLb tmproto.LightBlock
-	if err = protoLb.Unmarshal(lb.Meta); err != nil {
-		return nil, tmlightprovider.ErrBadLightBlock{Reason: err}
-	}
-	tlb, err := tmtypes.LightBlockFromProto(&protoLb)
-	if err != nil {
-		return nil, tmlightprovider.ErrBadLightBlock{Reason: err}
-	}
-	if err = tlb.ValidateBasic(lp.chainID); err != nil {
-		return nil, tmlightprovider.ErrBadLightBlock{Reason: err}
-	}
-
-	return tlb, nil
-}
-
-// Implements tmlightprovider.Provider.
-func (lp *lightClientProvider) ReportEvidence(ctx context.Context, ev tmtypes.Evidence) error {
-	proto, err := tmtypes.EvidenceToProto(ev)
-	if err != nil {
-		return fmt.Errorf("failed to convert evidence: %w", err)
-	}
-	meta, err := proto.Marshal()
-	if err != nil {
-		return fmt.Errorf("failed to marshal evidence: %w", err)
-	}
-
-	return lp.client.SubmitEvidence(ctx, &consensus.Evidence{Meta: meta})
-}
-
-// newLightClientProvider creates a new provider for the Tendermint's light client.
-//
-// The provided chain ID must be the Tendermint chain ID.
-func newLightClientProvider(
-	chainID string,
-	address node.TLSAddress,
-) (tmlightprovider.Provider, error) {
-	// Create TLS credentials.
-	opts := cmnGrpc.ClientOptions{
-		CommonName: identity.CommonName,
-		ServerPubKeys: map[signature.PublicKey]bool{
-			address.PubKey: true,
-		},
-	}
-	creds, err := cmnGrpc.NewClientCreds(&opts)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create TLS client credentials: %w", err)
-	}
-
-	conn, err := cmnGrpc.Dial(address.Address.String(), grpc.WithTransportCredentials(creds))
-	if err != nil {
-		return nil, fmt.Errorf("failed to dial public consensus service endpoint %s: %w", address, err)
-	}
-
-	return &lightClientProvider{
-		chainID: chainID,
-		client:  consensus.NewConsensusLightClient(conn),
-	}, nil
-}
 
 type lightClient struct {
 	// tmc is the Tendermint light client used for verifying headers.
@@ -201,22 +102,31 @@ func (lc *lightClient) GetVerifiedParameters(ctx context.Context, height int64) 
 }
 
 func (lc *lightClient) getPrimary() consensus.LightClientBackend {
-	return lc.tmc.Primary().(*lightClientProvider).client
+	return lc.tmc.Primary().(light.Provider).Backend()
 }
 
 // NewClient creates a new light client.
-func NewClient(ctx context.Context, cfg ClientConfig) (Client, error) {
-	if numNodes := len(cfg.ConsensusNodes); numNodes < 2 {
-		return nil, fmt.Errorf("at least two consensus nodes must be provided (got %d)", numNodes)
+func NewClient(ctx context.Context, cfg consensus.LightClientConfig, p2pClient p2prpc.Client) (consensus.LightClient, error) {
+	if numNodes := len(cfg.ConsensusNodes) + int(cfg.P2PNodes); numNodes < 2 {
+		return nil, fmt.Errorf("at least two consensus grpc or p2p nodes must be configured (got %d)", numNodes)
 	}
 
 	var providers []tmlightprovider.Provider
 	for _, address := range cfg.ConsensusNodes {
-		p, err := newLightClientProvider(cfg.GenesisDocument.ChainID, address)
+		p, err := grpc.NewLightClientProvider(cfg.GenesisDocument.ChainID, address)
 		if err != nil {
-			return nil, fmt.Errorf("failed to create light client provider: %w", err)
+			return nil, fmt.Errorf("failed to create grpc light client provider: %w", err)
 		}
 		providers = append(providers, p)
+	}
+	if p2pClient != nil {
+		for i := 0; i < int(cfg.P2PNodes); i++ {
+			p, err := p2p.NewLightClientProvider(ctx, cfg.GenesisDocument.ChainID, p2pClient)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create p2p light client provider: %w", err)
+			}
+			providers = append(providers, p)
+		}
 	}
 
 	tmc, err := tmlight.NewClient(
